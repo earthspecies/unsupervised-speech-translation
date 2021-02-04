@@ -1,16 +1,15 @@
 from collections import Counter, defaultdict
-import glob
 import json
 import math
 import random
+import os
 import sys
 
+import cv2
 import librosa
 import librosa.display
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.stats
-import soundfile as sf
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -47,30 +46,41 @@ class LibriMorseDataset(Dataset):
         for prefix, offsets in metadata.items():
             print(prefix)
 
+            offsets = [(i, w, st, ed) for i, (w, st, ed) in enumerate(offsets)]
             if subsample:
                 offsets_sampled = []
-                for word, st, ed in offsets:
+                for i, word, st, ed in offsets:
                     if random.random() > p_drop[word]:
-                        offsets_sampled.append((word, st, ed))
+                        offsets_sampled.append((i, word, st, ed))
                 offsets = offsets_sampled
 
-            audio, _ = librosa.load(f'data/LibriMorse/{prefix}.wav', sr=SR)
-            mfcc = get_mfcc(audio)
-            for i, (src_word, src_st, src_ed) in enumerate(offsets):
-                x = mfcc[:, int(src_st*100):int(src_ed*100)]
-                x = x.transpose()  # (L, F)
+            if len(offsets) <= 1:
+                print('Skipping short segments')
+                continue
+
+            cache_path = f'data/LibriMorse.cache/{prefix}.mfcc.npy'
+            if os.path.exists(cache_path):
+                mfcc = np.load(cache_path)
+            else:
+                audio, _ = librosa.load(f'data/LibriMorse/{prefix}.wav', sr=SR)
+                mfcc = get_mfcc(audio)
+                mfcc = mfcc.transpose()  # (L, F)
+                np.save(cache_path, mfcc)
+
+            for i, (src_offset, src_word, src_st, src_ed) in enumerate(offsets):
+                x = mfcc[int(src_st*100):int(src_ed*100), :]
                 for j in range(i-window, i+window+1):
                     if i == j or j < 0 or j >= len(offsets):
                         continue
-                    tgt_word, tgt_st, tgt_ed = offsets[j]
-                    y = mfcc[:, int(tgt_st*100):int(tgt_ed*100)]
-                    y = y.transpose()   # (L, F)
+                    tgt_offset, tgt_word, tgt_st, tgt_ed = offsets[j]
+                    if abs(tgt_offset - src_offset) > 3:
+                        continue
+                    y = mfcc[int(tgt_st*100):int(tgt_ed*100), :]
 
                     self.xs.append(x)
                     self.ys.append(y)
                     self.src_words.append(src_word)
                     self.tgt_words.append(tgt_word)
-                    print(f'{src_word} - {tgt_word}')
 
     def __len__(self):
         return len(self.xs)
@@ -80,8 +90,10 @@ class LibriMorseDataset(Dataset):
 
 
 class Speech2Vec(nn.Module):
-    def __init__(self, input_size=13, hidden_size=256):
+    def __init__(self, input_size=13, hidden_size=256, scale_factor=None):
         super(Speech2Vec, self).__init__()
+
+        self.scale_factor = scale_factor
 
         self.hidden_size = hidden_size
 
@@ -110,27 +122,41 @@ class Speech2Vec(nn.Module):
         self.loss_func = nn.MSELoss(reduction='none')
 
     def forward(self, xs, xs_len, ys=None, ys_len=None, ys_mask=None):
+        if self.scale_factor is not None:
+            xs = nn.functional.interpolate(xs.unsqueeze(1), scale_factor=(self.scale_factor, 1), mode='bilinear').squeeze(1)
+            if ys is not None:
+                ys = nn.functional.interpolate(ys.unsqueeze(1), scale_factor=(self.scale_factor, 1), mode='bilinear').squeeze(1)
+            if ys_mask is not None:
+                ys_mask = nn.functional.interpolate(ys_mask.unsqueeze(1), scale_factor=(self.scale_factor, 1), mode='bilinear').squeeze(1)
+
+            xs_len = [l * self.scale_factor for l in xs_len]
+            if ys_len is not None:
+                ys_len = [l * self.scale_factor for l in ys_len]
+
         xs = nn.utils.rnn.pack_padded_sequence(xs, xs_len, batch_first=True, enforce_sorted=False)
 
-        _, (embed, _) = self.encoder(xs)        
+        _, (embed, _) = self.encoder(xs)
         embed = torch.cat((embed[0], embed[1]), dim=1)
         embed = self.projection(embed)
 
         loss = None
+        out = None
         if ys is not None:
             ys_len_max = ys.shape[1]
             decoder_input = embed.view(-1, 1, self.hidden_size).repeat(1, ys_len_max, 1)
             decoder_input = nn.utils.rnn.pack_padded_sequence(decoder_input, ys_len, batch_first=True, enforce_sorted=False)
+            decoder_h0 = embed.unsqueeze(0)
+            decoder_c0 = torch.zeros_like(decoder_h0)
 
-            out, _ = self.decoder(decoder_input)
+            out, _ = self.decoder(decoder_input, (decoder_h0, decoder_c0))
             out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
             out = self.head(out)
 
             loss = self.loss_func(out, ys)
-            loss = (loss * ys_mask).mean(dim=1)    # mean time-wise
+            loss = (loss * ys_mask).sum(dim=1) / ys_mask.sum(dim=1)    # mean time-wise
             loss = loss.mean()                     # mean along batch & feature dims
-        
-        return loss, embed
+
+        return loss, embed, out
 
 
 def pad_collate(batch):
@@ -169,14 +195,15 @@ def main():
 
     dataloader = DataLoader(
         dataset=dataset,
-        batch_size=256,
+        batch_size=2048,
         shuffle=True,
         collate_fn=pad_collate)
 
-    model = Speech2Vec(hidden_size=256).to(device)
+    model = Speech2Vec(hidden_size=256, scale_factor=.2)
+    model = model.to(device)
     optimizer = optim.Adam(params=model.parameters(), lr=1e-3)
 
-    for epoch in range(100):
+    for epoch in range(500):
 
         # train
         model.train()
@@ -184,57 +211,68 @@ def main():
         train_loss = 0.
         train_steps = 0
 
-        for batch in dataloader:
+        for step, batch in enumerate(dataloader):
             xs, xs_len, ys, ys_len, ys_mask, src_words, tgt_words = batch
             xs = xs.to(device)
             ys = ys.to(device)
             ys_mask = ys_mask.to(device)
             optimizer.zero_grad()
 
-            loss, embed = model(xs, xs_len, ys, ys_len, ys_mask)
+            loss, embed, out = model(xs, xs_len, ys, ys_len, ys_mask)
             loss.backward()
 
             train_loss += loss.cpu()
             train_steps += 1
             optimizer.step()
 
+            if step % 100 == 0:
+                print(f'epoch = {epoch}, step = {step}, train_loss = {train_loss / train_steps}')
+                out = out[0].transpose(0, 1).unsqueeze(-1).repeat(1, 1, 3).detach().cpu().numpy()
+                out = (out + .1) * 255.
+                cv2.imwrite(f'log/out-{epoch:03d}-{step:03d}.png', out)
+                ys = nn.functional.interpolate(ys.unsqueeze(1), scale_factor=(model.scale_factor, 1), mode='bilinear').squeeze(1)
+                ys = ys[0].transpose(0, 1).unsqueeze(-1).repeat(1, 1, 3).detach().cpu().numpy()
+                ys = (ys + .1) * 255.
+                cv2.imwrite(f'log/ys-{epoch:03d}-{step:03d}.png', ys)
+
         print(f'epoch = {epoch}, train_loss = {train_loss / train_steps}')
 
-        # eval
-        model.eval()
+        if epoch % 5 == 0:
+            # eval
+            model.eval()
 
-        embeds = defaultdict(list)
-        for batch in dataloader:
-            xs, xs_len, _, _, _, src_words, _ = batch
-            xs = xs.to(device)
+            embeds = defaultdict(list)
+            for batch in dataloader:
+                xs, xs_len, _, _, _, src_words, _ = batch
+                xs = xs.to(device)
 
-            with torch.no_grad():
-                _, embed = model(xs, xs_len)
+                with torch.no_grad():
+                    _, embed, _ = model(xs, xs_len)
 
-            for word, vec in zip(src_words, embed):
-                embeds[word].append(vec.detach())
+                for word, vec in zip(src_words, embed):
+                    embeds[word].append(vec.detach())
 
-        embeds_mean = {word: torch.vstack(vecs).mean(dim=0) for word, vecs in embeds.items()}
+            embeds_mean = {word: torch.vstack(vecs).mean(dim=0) for word, vecs in embeds.items()}
 
-        cos = nn.CosineSimilarity(dim=0)
-        golds = []
-        preds = []
+            cos = nn.CosineSimilarity(dim=0)
+            golds = []
+            preds = []
 
-        with open('data/SimLex-999/SimLex-999.txt') as f:
-            next(f)
-            for line in f:
-                w1, w2, _, gold = line.split('\t')[:4]
-                w1 = w1.upper()
-                w2 = w2.upper()
-                gold = float(gold)
-                if w1 in embeds_mean and w2 in embeds_mean:
-                    pred = cos(embeds_mean[w1], embeds_mean[w2]).item()
+            with open('data/SimLex-999/SimLex-999.txt') as f:
+                next(f)
+                for line in f:
+                    w1, w2, _, gold = line.split('\t')[:4]
+                    w1 = w1.upper()
+                    w2 = w2.upper()
+                    gold = float(gold)
+                    if w1 in embeds_mean and w2 in embeds_mean:
+                        pred = cos(embeds_mean[w1], embeds_mean[w2]).item()
 
-                    golds.append(gold)
-                    preds.append(pred)
+                        golds.append(gold)
+                        preds.append(pred)
 
-        corr, _ = scipy.stats.pearsonr(golds, preds)
-        print(corr)
+            corr, _ = scipy.stats.pearsonr(golds, preds)
+            print(corr)
 
 if __name__ == '__main__':
     main()
