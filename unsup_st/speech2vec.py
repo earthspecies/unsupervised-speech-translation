@@ -9,11 +9,12 @@ import cv2
 import librosa
 import librosa.display
 import numpy as np
-import scipy.stats
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+
+from unsup_st.evaluate_embed import evaluate_embed
 
 
 SR = 16000
@@ -254,25 +255,7 @@ def main():
 
             embeds_mean = {word: torch.vstack(vecs).mean(dim=0) for word, vecs in embeds.items()}
 
-            cos = nn.CosineSimilarity(dim=0)
-            golds = []
-            preds = []
-
-            with open('data/SimLex-999/SimLex-999.txt') as f:
-                next(f)
-                for line in f:
-                    w1, w2, _, gold = line.split('\t')[:4]
-                    w1 = w1.upper()
-                    w2 = w2.upper()
-                    gold = float(gold)
-                    if w1 in embeds_mean and w2 in embeds_mean:
-                        pred = cos(embeds_mean[w1], embeds_mean[w2]).item()
-
-                        golds.append(gold)
-                        preds.append(pred)
-
-            corr, _ = scipy.stats.pearsonr(golds, preds)
-            print(corr)
+            evaluate_embed(embeds_mean)
 
 if __name__ == '__main__':
     main()
