@@ -102,17 +102,11 @@ class LibriMorseDataset(Dataset):
 
                 for (src_st, src_ed), (tgt_st, tgt_ed) in chosen_pairs:
                     x = mfcc[int(src_st*FRAMES_PER_SEC):int(src_ed*FRAMES_PER_SEC), :]
-                    if x.shape[0] > 300:
-                        x = x[:300, :]
-
                     y = mfcc[int(tgt_st*FRAMES_PER_SEC):int(tgt_ed*FRAMES_PER_SEC), :]
-                    if y.shape[0] > 300:
-                        y = y[:300, :]
 
                     self.xs.append(x)
                     self.ys.append(y)
 
-        print(len(self.xs), len(self.ys), len(self.src_words), len(self.tgt_words))
         assert len(self.xs) == len(self.ys) == len(self.src_words) == len(self.tgt_words)
 
     def __len__(self):

@@ -41,7 +41,8 @@ class Speech2Vec(nn.Module):
             bidirectional=True
         )
 
-        self.projection = nn.Linear(hidden_size, hidden_size)
+        self.projection_x = nn.Linear(hidden_size*2, hidden_size)
+        self.projection_y = nn.Linear(hidden_size*2, hidden_size)
 
         self.loss_func = nn.CrossEntropyLoss()
 
@@ -62,8 +63,8 @@ class Speech2Vec(nn.Module):
         xs = nn.utils.rnn.pack_padded_sequence(xs, xs_len, batch_first=True, enforce_sorted=False)
 
         _, (xs_embed, _) = self.encoder(xs)
-        # xs_embed = torch.cat((xs_embed[0], xs_embed[1]), dim=1)
-        xs_embed = xs_embed[0] + xs_embed[1]
+        xs_embed = torch.cat((xs_embed[0], xs_embed[1]), dim=1)
+        xs_embed = self.projection_x(xs_embed)
 
         loss = None
         if ys is not None:
@@ -71,9 +72,8 @@ class Speech2Vec(nn.Module):
             ys_len = [l // 8 for l in ys_len]
             ys = nn.utils.rnn.pack_padded_sequence(ys, ys_len, batch_first=True, enforce_sorted=False)
             _, (ys_embed, _) = self.encoder(ys)
-            # ys_embed = torch.cat((ys_embed[0], ys_embed[1]), dim=1)
-            ys_embed = ys_embed[0] + ys_embed[1]
-            ys_embed = self.projection(ys_embed)
+            ys_embed = torch.cat((ys_embed[0], ys_embed[1]), dim=1)
+            ys_embed = self.projection_y(ys_embed)
 
             batch_size = xs_embed.shape[0]
             pred = torch.mm(xs_embed, ys_embed.transpose(0, 1))
@@ -154,7 +154,7 @@ def main():
 
     optimizer = optim.Adam(params=model.parameters(), lr=args.lr)
 
-    for epoch in range(500):
+    for epoch in range(150):
 
         # train
         model.train()
