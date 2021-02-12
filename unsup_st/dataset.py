@@ -13,7 +13,7 @@ SR = 16000
 FRAMES_PER_SEC = 50
 Vocabulary = namedtuple('Vocabulary', 'p_drop word2id id2word')
 
-def get_mfcc(audio):
+def get_mfcc(audio, normalize=False):
     n_fft = 512
     hop_length = SR // FRAMES_PER_SEC
     mfcc = librosa.feature.mfcc(
@@ -25,9 +25,10 @@ def get_mfcc(audio):
         win_length=n_fft,
         window='hann')
 
-    mean = mfcc.mean(axis=1, keepdims=True)
-    std = mfcc.std(axis=1, keepdims=True)
-    mfcc = (mfcc - mean) / std
+    if normalize:
+        mean = mfcc.mean(axis=1, keepdims=True)
+        std = mfcc.std(axis=1, keepdims=True)
+        mfcc = (mfcc - mean) / std
     return mfcc
 
 
@@ -96,7 +97,7 @@ class LibriMorseDataset(Dataset):
                     mfcc = np.load(cache_path)
                 else:
                     audio, _ = librosa.load(f'data/LibriMorse/{prefix}.wav', sr=SR)
-                    mfcc = get_mfcc(audio)
+                    mfcc = get_mfcc(audio, normalize=False)
                     mfcc = mfcc.transpose()  # (L, F)
                     np.save(cache_path, mfcc)
 
@@ -107,7 +108,7 @@ class LibriMorseDataset(Dataset):
                     self.xs.append(x)
                     self.ys.append(y)
 
-        assert len(self.xs) == len(self.ys) == len(self.src_words) == len(self.tgt_words)
+                assert len(self.xs) == len(self.ys) == len(self.src_words) == len(self.tgt_words)
 
     def __len__(self):
         return len(self.src_words)

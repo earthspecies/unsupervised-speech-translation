@@ -1,8 +1,10 @@
 from collections import defaultdict
 import json
+import math
 import random
 
 import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,7 +15,7 @@ from unsup_st.dataset import LibriMorseDataset, build_vocabulary
 
 
 class Speech2Vec(nn.Module):
-    def __init__(self, input_size=13, hidden_size=100, scale_factor=None, use_bidirectional_loss=False):
+    def __init__(self, input_size=13, hidden_size=100, hidden_channels=256, scale_factor=None, mean=None, std=None):
         super(Speech2Vec, self).__init__()
 
         self.scale_factor = scale_factor
@@ -21,13 +23,13 @@ class Speech2Vec(nn.Module):
         self.hidden_size = hidden_size
 
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=input_size, out_channels=32, kernel_size=3, stride=2, padding=1),
+            nn.Conv1d(in_channels=input_size, out_channels=32, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm1d(32),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=32, out_channels=48, kernel_size=3, stride=2, padding=1),
+            nn.Conv1d(in_channels=32, out_channels=48, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm1d(48),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=48, out_channels=hidden_size, kernel_size=3, stride=2, padding=1),
+            nn.Conv1d(in_channels=48, out_channels=hidden_size, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm1d(hidden_size),
             nn.ReLU(inplace=True)
         )
@@ -41,14 +43,20 @@ class Speech2Vec(nn.Module):
             bidirectional=True
         )
 
-        self.projection_x = nn.Linear(hidden_size*2, hidden_size)
-        self.projection_y = nn.Linear(hidden_size*2, hidden_size)
+        self.projection = nn.Linear(hidden_size*2, hidden_size*2)
 
         self.loss_func = nn.CrossEntropyLoss()
 
-        self.use_bidirectional_loss = use_bidirectional_loss
+        self.mean = mean
+        self.std = std
 
     def forward(self, xs, xs_len, ys=None, ys_len=None):
+        if self.mean is not None:
+            xs = (xs - self.mean) / self.std
+        if ys is not None:
+            if self.mean is not None:
+                ys = (ys - self.mean) / self.std
+
         if self.scale_factor is not None:
             xs = nn.functional.interpolate(xs.unsqueeze(1), scale_factor=(self.scale_factor, 1), mode='bilinear').squeeze(1)
             if ys is not None:
@@ -58,13 +66,15 @@ class Speech2Vec(nn.Module):
             if ys_len is not None:
                 ys_len = [l * self.scale_factor for l in ys_len]
 
+        padding = 2
+        kernel_size = 5
+        f = lambda x: math.floor((x + 2 * padding - (kernel_size - 1) - 1) / 2 + 1)
         xs = self.cnn(xs.transpose(1, 2)).transpose(1, 2)
-        xs_len = [l // 8 for l in xs_len]
+        xs_len = [f(f(f(l))) for l in xs_len]
         xs = nn.utils.rnn.pack_padded_sequence(xs, xs_len, batch_first=True, enforce_sorted=False)
 
         _, (xs_embed, _) = self.encoder(xs)
         xs_embed = torch.cat((xs_embed[0], xs_embed[1]), dim=1)
-        xs_embed = self.projection_x(xs_embed)
 
         loss = None
         if ys is not None:
@@ -73,16 +83,12 @@ class Speech2Vec(nn.Module):
             ys = nn.utils.rnn.pack_padded_sequence(ys, ys_len, batch_first=True, enforce_sorted=False)
             _, (ys_embed, _) = self.encoder(ys)
             ys_embed = torch.cat((ys_embed[0], ys_embed[1]), dim=1)
-            ys_embed = self.projection_y(ys_embed)
+            ys_embed = self.projection(ys_embed)
 
             batch_size = xs_embed.shape[0]
             pred = torch.mm(xs_embed, ys_embed.transpose(0, 1))
             gold = torch.arange(start=0, end=batch_size, device=pred.device)
             loss = self.loss_func(pred, gold)
-
-            if self.use_bidirectional_loss:
-                loss_backward = self.loss_func(pred.transpose(0, 1), gold)
-                loss = (loss + loss_backward) / 2.
 
         return loss, xs_embed
 
@@ -146,15 +152,26 @@ def main():
     train_dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=pad_collate)
     valid_dataloader = DataLoader(dataset=valid_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=pad_collate)
 
+    xys = []
+    for i in range(10):
+        xs, ys, _, _ = train_dataset[i]
+        xys.append(xs)
+        xys.append(ys)
+    xys = np.concatenate(xys, axis=0)
+    mean = torch.tensor(xys.mean(axis=0)).to(device)
+    std = torch.tensor(xys.std(axis=0)).to(device)
+
     model = Speech2Vec(
         hidden_size=args.hidden_size,
+        hidden_channels=128,
         scale_factor=.5,
-        use_bidirectional_loss=False)
+        mean=mean,
+        std=std)
     model = model.to(device)
 
     optimizer = optim.Adam(params=model.parameters(), lr=args.lr)
 
-    for epoch in range(150):
+    for epoch in range(151):
 
         # train
         model.train()
