@@ -15,23 +15,35 @@ from unsup_st.dataset import LibriMorseDataset, build_vocabulary
 
 
 class Speech2Vec(nn.Module):
-    def __init__(self, input_size=13, hidden_size=100, hidden_channels=256, scale_factor=None, mean=None, std=None):
+    def __init__(self,
+                 input_size=13,
+                 hidden_size=100,
+                 hidden_channels=None,
+                 scale_factor=None,
+                 mean=None,
+                 std=None,
+                 additive_margin=None):
         super(Speech2Vec, self).__init__()
 
         self.scale_factor = scale_factor
 
         self.hidden_size = hidden_size
 
+        self.hidden_channels = hidden_channels or (32, 48)
+
+        self.kernel_size = 5
+        self.padding = 2
+
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=input_size, out_channels=32, kernel_size=5, stride=2, padding=2),
-            nn.BatchNorm1d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=32, out_channels=48, kernel_size=5, stride=2, padding=2),
-            nn.BatchNorm1d(48),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=48, out_channels=hidden_size, kernel_size=5, stride=2, padding=2),
+            nn.Conv1d(in_channels=input_size, out_channels=hidden_channels[0], kernel_size=self.kernel_size, stride=2, padding=self.padding),
+            nn.BatchNorm1d(hidden_channels[0]),
+            nn.LeakyReLU(),
+            nn.Conv1d(in_channels=hidden_channels[0], out_channels=hidden_channels[1], kernel_size=self.kernel_size, stride=2, padding=self.padding),
+            nn.BatchNorm1d(hidden_channels[1]),
+            nn.LeakyReLU(),
+            nn.Conv1d(in_channels=hidden_channels[1], out_channels=hidden_size, kernel_size=self.kernel_size, stride=2, padding=self.padding),
             nn.BatchNorm1d(hidden_size),
-            nn.ReLU(inplace=True)
+            nn.LeakyReLU()
         )
 
         self.encoder = nn.LSTM(
@@ -50,6 +62,8 @@ class Speech2Vec(nn.Module):
         self.mean = mean
         self.std = std
 
+        self.additive_margin = additive_margin
+
     def forward(self, xs, xs_len, ys=None, ys_len=None):
         if self.mean is not None:
             xs = (xs - self.mean) / self.std
@@ -66,9 +80,7 @@ class Speech2Vec(nn.Module):
             if ys_len is not None:
                 ys_len = [l * self.scale_factor for l in ys_len]
 
-        padding = 2
-        kernel_size = 5
-        f = lambda x: math.floor((x + 2 * padding - (kernel_size - 1) - 1) / 2 + 1)
+        f = lambda x: math.floor((x + 2 * self.padding - (self.kernel_size - 1) - 1) / 2 + 1)
         xs = self.cnn(xs.transpose(1, 2)).transpose(1, 2)
         xs_len = [f(f(f(l))) for l in xs_len]
         xs = nn.utils.rnn.pack_padded_sequence(xs, xs_len, batch_first=True, enforce_sorted=False)
@@ -87,6 +99,8 @@ class Speech2Vec(nn.Module):
 
             batch_size = xs_embed.shape[0]
             pred = torch.mm(xs_embed, ys_embed.transpose(0, 1))
+            if self.additive_margin is not None:
+                pred -= self.additive_margin * torch.eye(batch_size, device=pred.device)
             gold = torch.arange(start=0, end=batch_size, device=pred.device)
             loss = self.loss_func(pred, gold)
 
@@ -120,6 +134,7 @@ def main():
     parser.add_argument('--hidden-size', type=int)
     parser.add_argument('--lr', type=float)
     parser.add_argument('--batch-size', type=int)
+    parser.add_argument('--additive-margin', type=float)
     args = parser.parse_args()
 
     random.seed(42)
@@ -163,10 +178,11 @@ def main():
 
     model = Speech2Vec(
         hidden_size=args.hidden_size,
-        hidden_channels=128,
+        hidden_channels=(32, 48),
         scale_factor=.5,
         mean=mean,
-        std=std)
+        std=std,
+        additive_margin=args.additive_margin)
     model = model.to(device)
 
     optimizer = optim.Adam(params=model.parameters(), lr=args.lr)
