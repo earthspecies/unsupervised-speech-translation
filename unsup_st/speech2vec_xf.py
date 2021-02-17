@@ -3,6 +3,7 @@ import json
 import math
 import random
 
+from apex import amp
 import numpy as np
 import torch
 import torch.nn as nn
@@ -261,6 +262,7 @@ class Speech2VecXF(nn.Module):
     def __init__(self,
                  input_size=13,
                  hidden_size=100,
+                 layers=2,
                  scale_factor=None,
                  mean=None,
                  std=None,
@@ -271,15 +273,15 @@ class Speech2VecXF(nn.Module):
 
         self.encoder = Encoder(
             d_input=input_size,
-            n_layers=2,
+            n_layers=layers,
             n_head=8,
-            d_k=8,
-            d_v=8,
-            d_model=64,
-            d_inner=256
+            d_k=hidden_size//8,
+            d_v=hidden_size//8,
+            d_model=hidden_size,
+            d_inner=hidden_size*4
         )
 
-        self.projection = nn.Linear(64, 64)
+        self.projection = nn.Linear(hidden_size, hidden_size)
 
         self.loss_func = nn.CrossEntropyLoss()
 
@@ -345,6 +347,7 @@ def main():
     parser.add_argument('--train-dataset', type=str)
     parser.add_argument('--valid-dataset', type=str)
     parser.add_argument('--hidden-size', type=int)
+    parser.add_argument('--layers', type=int)
     parser.add_argument('--lr', type=float)
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--additive-margin', type=float)
@@ -391,6 +394,7 @@ def main():
 
     model = Speech2VecXF(
         hidden_size=args.hidden_size,
+        layers=args.layers,
         scale_factor=.5,
         mean=mean,
         std=std,
@@ -398,6 +402,7 @@ def main():
     model = model.to(device)
 
     optimizer = optim.Adam(params=model.parameters(), lr=args.lr)
+    # model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
 
     for epoch in range(151):
 
@@ -414,6 +419,8 @@ def main():
             optimizer.zero_grad()
 
             loss, embed = model(xs, xs_len, ys, ys_len)
+            # with amp.scale_loss(loss, optimizer) as scaled_loss:
+                # scaled_loss.backward()
             loss.backward()
 
             train_loss += loss.cpu()
