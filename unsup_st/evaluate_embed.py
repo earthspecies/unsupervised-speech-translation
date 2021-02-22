@@ -1,3 +1,4 @@
+from collections import Counter
 import csv
 
 import torch.nn as nn
@@ -10,8 +11,21 @@ BENCHMARKS = {
     'men': 'word-benchmarks/word-similarity/monolingual/en/men.csv'
 }
 
+SAMPLES = ['CAR', 'FRUIT', 'HAPPY', 'JUMP']
+
 def evaluate_embed(embed):
     cos = nn.CosineSimilarity(dim=0)
+
+    for query in SAMPLES:
+        v_query = embed[query]
+        sims = Counter()
+        for target, v_target in embed.items():
+            if query == target:
+                continue
+
+            sims[target] = cos(v_query, v_target).item()
+
+        print(query, ' - ', ' '.join(f'{target}:{sim:0.2f}' for target, sim in sims.most_common(10)))
 
     for benchmark, filepath in BENCHMARKS.items():
         golds = []
@@ -42,3 +56,13 @@ def evaluate_embed(embed):
 
         corr, _ = scipy.stats.pearsonr(golds, preds)
         print(f'benchmark = {benchmark}, corr = {corr}, # valid = {len(preds)} / {total_rows}')
+
+
+def save_embed(embed, path):
+    with open(path, mode='w') as f:
+        for word, vec in embed.items():
+            values = [f'{v:.4f}' for v in vec]
+            f.write(word)
+            f.write(' ')
+            f.write(' '.join(values))
+            f.write('\n')

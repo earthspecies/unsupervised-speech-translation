@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from unsup_st.evaluate_embed import evaluate_embed
+from unsup_st.evaluate_embed import evaluate_embed, save_embed
 from unsup_st.dataset import LibriMorseDataset, build_vocabulary
 
 
@@ -456,6 +456,7 @@ def main():
             embeds_mean = {word: torch.vstack(vecs).mean(dim=0) for word, vecs in embeds.items()}
 
             evaluate_embed(embeds_mean)
+            save_embed(embeds_mean, f'data/embed/epoch{epoch:03}.vec')
 
 if __name__ == '__main__':
     main()
