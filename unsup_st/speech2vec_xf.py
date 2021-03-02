@@ -344,6 +344,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('--datadir', type=str)
     parser.add_argument('--train-dataset', type=str)
     parser.add_argument('--valid-dataset', type=str)
     parser.add_argument('--hidden-size', type=int)
@@ -377,8 +378,8 @@ def main():
     all_metadata.update(valid_metadata)
     vocab = build_vocabulary(all_metadata, min_freq=3)
 
-    train_dataset = LibriMorseDataset(train_metadata, vocab=vocab, window=3, subsample=True, load_audio=True)
-    valid_dataset = LibriMorseDataset(valid_metadata, vocab=vocab, window=3, subsample=True, load_audio=True)
+    train_dataset = LibriMorseDataset(train_metadata, datadir=args.datadir, vocab=vocab, window=3, subsample=True, load_audio=True)
+    valid_dataset = LibriMorseDataset(valid_metadata, datadir=args.datadir, vocab=vocab, window=3, subsample=True, load_audio=True)
 
     train_dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=pad_collate)
     valid_dataloader = DataLoader(dataset=valid_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=pad_collate)

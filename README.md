@@ -18,10 +18,18 @@ wget https://www.openslr.org/resources/12/train-clean-360.tar.gz
 tar zxvf train-clean-360.tar.gz
 ```
 
-## Create Morse code datasets
+## Generate Morse code datasets
 
 ```
 python unsup_st/morse.py --src data/LibriSpeech --dest data/LibriMorse --dataset dev-clean
 python unsup_st/morse.py --src data/LibriSpeech --dest data/LibriMorse --dataset train-clean-100
 python unsup_st/morse.py --src data/LibriSpeech --dest data/LibriMorse --dataset train-clean-360
+```
+
+## Convert datasets into features
+
+```
+python unsup_st/cache_dataset.py --src data/LibriMorse --dest data/LibriMorse.cache --dataset dev-clean
+python unsup_st/cache_dataset.py --src data/LibriMorse --dest data/LibriMorse.cache --dataset train-clean-100
+python unsup_st/cache_dataset.py --src data/LibriMorse --dest data/LibriMorse.cache --dataset train-clean-360
 ```

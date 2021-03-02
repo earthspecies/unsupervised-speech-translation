@@ -52,7 +52,7 @@ def build_vocabulary(metadata, min_freq=3):
 
 
 class LibriMorseDataset(Dataset):
-    def __init__(self, metadata, vocab, window=3, subsample=True, load_audio=True):
+    def __init__(self, metadata, datadir, vocab, window=3, subsample=True, load_audio=True):
         self.load_audio = load_audio
 
         self.xs = []
@@ -92,14 +92,8 @@ class LibriMorseDataset(Dataset):
                 continue
 
             if load_audio:
-                cache_path = f'data/LibriMorse.cache/{prefix}.mfcc.npy'
-                if os.path.exists(cache_path):
-                    mfcc = np.load(cache_path)
-                else:
-                    audio, _ = librosa.load(f'data/LibriMorse/{prefix}.wav', sr=SR)
-                    mfcc = get_mfcc(audio, normalize=False)
-                    mfcc = mfcc.transpose()  # (L, F)
-                    np.save(cache_path, mfcc)
+                cache_path = f'{datadir}/{prefix}.mfcc.npy'
+                mfcc = np.load(cache_path)
 
                 for (src_st, src_ed), (tgt_st, tgt_ed) in chosen_pairs:
                     x = mfcc[int(src_st*FRAMES_PER_SEC):int(src_ed*FRAMES_PER_SEC), :]
