@@ -33,3 +33,34 @@ python unsup_st/cache_dataset.py --src data/LibriMorse --dest data/LibriMorse.ca
 python unsup_st/cache_dataset.py --src data/LibriMorse --dest data/LibriMorse.cache --dataset train-clean-100
 python unsup_st/cache_dataset.py --src data/LibriMorse --dest data/LibriMorse.cache --dataset train-clean-360
 ```
+
+## Train the models
+
+RNN-based CPC Speech2Vec model:
+
+```
+python unsup_st/speech2vec_cpc.py \
+    --model rnn \
+    --datadir data/LibriMorse.cache \
+    --train-dataset data/LibriMorse/train-clean-100/metadata.jsonl,data/LibriMorse/train-clean-360/metadata.jsonl \
+    --valid-dataset data/LibriMorse/dev-clean/metadata.jsonl \
+    --hidden-size 128 \
+    --lr 1e-3 \
+    --batch-size 450 \
+    --additive-margin 0.2
+```
+
+Transformer-based CPC Speech2Vec model:
+
+```
+python unsup_st/speech2vec_cpc.py \
+    --model transformer \
+    --datadir data/LibriMorse.cache \
+    --train-dataset data/LibriMorse/train-clean-100/metadata.jsonl,data/LibriMorse/train-clean-360/metadata.jsonl \
+    --valid-dataset data/LibriMorse/dev-clean/metadata.jsonl \
+    --hidden-size 128 \
+    --layers 2 \
+    --lr 1e-3 \
+    --batch-size 450 \
+    --additive-margin 0.2
+```
