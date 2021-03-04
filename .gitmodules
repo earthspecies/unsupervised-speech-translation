@@ -1,0 +1,3 @@
+[submodule "word-benchmarks"]
+	path = word-benchmarks
+	url = https://github.com/vecto-ai/word-benchmarks.git

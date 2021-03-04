@@ -33,6 +33,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, choices=['rnn', 'transformer'])
     parser.add_argument('--datadir', type=str)
+    parser.add_argument('--outdir', type=str)
     parser.add_argument('--train-dataset', type=str)
     parser.add_argument('--valid-dataset', type=str)
     parser.add_argument('--hidden-size', type=int)
@@ -147,7 +148,7 @@ def main():
             embeds_mean = {word: torch.vstack(vecs).mean(dim=0) for word, vecs in embeds.items()}
 
             evaluate_embed(embeds_mean)
-            save_embed(embeds_mean, f'data/embed/epoch{epoch:03}.vec')
+            save_embed(embeds_mean, f'{args.outdir}/epoch{epoch:03}.vec')
 
 if __name__ == '__main__':
     main()
