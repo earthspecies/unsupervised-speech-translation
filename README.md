@@ -11,6 +11,13 @@ See the following slides for more info:
 
 ## Prerequisites
 
+First, clone this repo, and run:
+
+```
+git submodule init
+git submodule update
+```
+
 You can set up an environment and install prerequisites as follows:
 
 ```
