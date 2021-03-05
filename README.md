@@ -14,6 +14,7 @@ See the following slides for more info:
 You can set up an environment and install prerequisites as follows:
 
 ```
+sudo apt-get install libsndfile1    # required for librosa
 conda create -n myenv python=3.7
 conda activate myenv
 conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
